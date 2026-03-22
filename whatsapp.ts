@@ -163,3 +163,91 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 // --- Connect to Claude Code ---
 await mcp.connect(new StdioServerTransport())
 console.error('[whatsapp] MCP server connected.')
+
+// --- Webhook HTTP listener ---
+Bun.serve({
+  port: ENV.webhookPort,
+  hostname: '127.0.0.1',
+  async fetch(req) {
+    // Only handle POST /webhook
+    const url = new URL(req.url)
+    if (req.method !== 'POST' || url.pathname !== '/webhook') {
+      return new Response('not found', { status: 404 })
+    }
+
+    // 1. Verify webhook secret
+    const incomingSecret = req.headers.get('apikey')
+    if (incomingSecret !== ENV.webhookSecret) {
+      console.error('[whatsapp] Webhook secret mismatch — dropping request')
+      return new Response('ok')  // 200 to prevent retries
+    }
+
+    // 2. Parse payload
+    let payload: any
+    try {
+      payload = await req.json()
+    } catch {
+      console.error('[whatsapp] Failed to parse webhook payload as JSON')
+      return new Response('ok')
+    }
+
+    // 3. Only handle MESSAGES_UPSERT events
+    if (payload.event !== 'messages.upsert') {
+      return new Response('ok')
+    }
+
+    const data = payload.data
+    if (!data?.key) {
+      return new Response('ok')
+    }
+
+    // 4. Skip outbound echoes
+    if (data.key.fromMe === true) {
+      return new Response('ok')
+    }
+
+    // 5. Extract and normalise sender
+    const remoteJid: string = data.key.remoteJid ?? ''
+    const senderPhone = remoteJid.replace('@s.whatsapp.net', '')
+
+    // 6. Allowlist check
+    if (senderPhone !== ENV.allowedNumber) {
+      console.error(`[whatsapp] Dropping message from non-allowlisted sender: ${senderPhone}`)
+      return new Response('ok')
+    }
+
+    // 7. Extract message text
+    const messageText: string =
+      data.message?.conversation ??
+      data.message?.extendedTextMessage?.text ??
+      '[unsupported message type]'
+
+    const messageId: string = data.key.id ?? 'unknown'
+    const instanceName: string = payload.instance ?? ENV.instance
+
+    // 8. Warn on instance mismatch
+    if (instanceName !== ENV.instance) {
+      console.error(
+        `[whatsapp] Warning: webhook instance "${instanceName}" doesn't match EVOLUTION_INSTANCE "${ENV.instance}"`,
+      )
+    }
+
+    // 9. Emit channel notification
+    console.error(`[whatsapp] Message from ${senderPhone}: ${messageText.slice(0, 60)}`)
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: xmlEscape(messageText),
+        meta: {
+          phone: senderPhone,
+          instance: instanceName,
+          message_id: messageId,
+        },
+      },
+    })
+
+    return new Response('ok')
+  },
+})
+
+console.error(`[whatsapp] Webhook listener on http://127.0.0.1:${ENV.webhookPort}/webhook`)
