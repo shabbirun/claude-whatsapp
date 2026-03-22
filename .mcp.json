@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "whatsapp": {
-      "command": "bun",
+      "command": "/Users/shabbirun/.bun/bin/bun",
       "args": ["./whatsapp.ts"],
       "env": {}
     }
