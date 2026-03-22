@@ -197,7 +197,7 @@ Bun.serve({
       senderId === ENV.allowedNumber ||
       (ENV.allowedJid !== '' && senderId === ENV.allowedJid)
     if (!isAllowed) {
-      console.error(`[whatsapp] Dropping message from: ${remoteJid}`)
+      console.error(`[whatsapp] Blocked — add ALLOWED_JID=${senderId} to your .env and restart`)
       return new Response('ok')
     }
 
