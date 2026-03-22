@@ -3,8 +3,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
+  ListToolsRequestSchema,  // used in Task 5: reply tool registration
+  CallToolRequestSchema,   // used in Task 5: reply tool registration
 } from '@modelcontextprotocol/sdk/types.js'
 
 // --- Env validation (must run before anything else) ---
