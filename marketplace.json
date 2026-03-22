@@ -1,0 +1,18 @@
+{
+  "name": "claude-whatsapp",
+  "owner": {
+    "name": "shabbirun"
+  },
+  "metadata": {
+    "description": "WhatsApp channel plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "whatsapp-evolution",
+      "description": "Two-way WhatsApp channel via a self-hosted Evolution API instance",
+      "source": "./plugins/whatsapp-evolution",
+      "category": "channels",
+      "keywords": ["whatsapp", "channel", "evolution-api", "messaging"]
+    }
+  ]
+}

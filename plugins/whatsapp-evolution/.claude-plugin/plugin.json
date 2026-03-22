@@ -1,0 +1,8 @@
+{
+  "name": "whatsapp-evolution",
+  "description": "Two-way WhatsApp channel for Claude Code via a self-hosted Evolution API instance. Receives messages over a local webhook and replies using the Evolution API sendText endpoint.",
+  "version": "1.0.0",
+  "author": { "name": "shabbirun" },
+  "license": "MIT",
+  "keywords": ["whatsapp", "channel", "evolution-api", "messaging"]
+}

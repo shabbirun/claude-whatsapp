@@ -3,11 +3,32 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
-  ListToolsRequestSchema,  // used in Task 5: reply tool registration
-  CallToolRequestSchema,   // used in Task 5: reply tool registration
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 
-// --- Env validation (must run before anything else) ---
+// --- Load .env from PLUGIN_DATA (persists across updates) or cwd (dev mode) ---
+// Bun auto-loads .env from cwd. In plugin mode we also check $PLUGIN_DATA.
+const pluginDataDir = process.env.PLUGIN_DATA
+if (pluginDataDir) {
+  const envFile = Bun.file(`${pluginDataDir}/.env`)
+  if (await envFile.exists()) {
+    const lines = (await envFile.text()).split('\n')
+    for (const line of lines) {
+      const t = line.trim()
+      if (!t || t.startsWith('#')) continue
+      const eq = t.indexOf('=')
+      if (eq === -1) continue
+      const key = t.slice(0, eq).trim()
+      const val = t.slice(eq + 1).trim().replace(/^["'](.*)["']$/, '$1')
+      if (key && !(key in process.env)) {
+        process.env[key] = val
+      }
+    }
+  }
+}
+
+// --- Env validation ---
 const REQUIRED = [
   'EVOLUTION_API_URL',
   'EVOLUTION_API_KEY',
@@ -18,6 +39,9 @@ const REQUIRED = [
 for (const key of REQUIRED) {
   if (!process.env[key]?.trim()) {
     console.error(`[whatsapp] Missing required env var: ${key}`)
+    if (pluginDataDir) {
+      console.error(`[whatsapp] Edit your config at: ${pluginDataDir}/.env`)
+    }
     process.exit(1)
   }
 }
@@ -28,11 +52,11 @@ if (!/^\d+$/.test(process.env.ALLOWED_NUMBER!)) {
 }
 
 const ENV = {
-  apiUrl:         process.env.EVOLUTION_API_URL!,
-  apiKey:         process.env.EVOLUTION_API_KEY!,
-  instance:       process.env.EVOLUTION_INSTANCE!,
-  allowedNumber:  process.env.ALLOWED_NUMBER!,          // phone number for outbound replies
-  allowedJid:     process.env.ALLOWED_JID ?? '',         // @lid identifier for allowlisting (optional)
+  apiUrl:        process.env.EVOLUTION_API_URL!,
+  apiKey:        process.env.EVOLUTION_API_KEY!,
+  instance:      process.env.EVOLUTION_INSTANCE!,
+  allowedNumber: process.env.ALLOWED_NUMBER!,
+  allowedJid:    process.env.ALLOWED_JID ?? '',
   webhookPort: (() => {
     const p = parseInt(process.env.WEBHOOK_PORT ?? '3456', 10)
     if (isNaN(p)) { console.error('[whatsapp] WEBHOOK_PORT must be a number'); process.exit(1) }
@@ -40,9 +64,7 @@ const ENV = {
   })(),
 } as const
 
-console.error('[whatsapp] Env validated. Starting...')
-
-// --- XML escape utility (prompt injection prevention) ---
+// --- XML escape (prompt injection prevention) ---
 function xmlEscape(str: string | null | undefined): string {
   if (!str) return ''
   return str
@@ -58,8 +80,8 @@ const mcp = new Server(
   { name: 'whatsapp', version: '1.0.0' },
   {
     capabilities: {
-      experimental: { 'claude/channel': {} },  // Claude Code channel extension
-      tools: {},                                 // enables tool discovery
+      experimental: { 'claude/channel': {} },
+      tools: {},
     },
     instructions:
       'You are a WhatsApp assistant. Messages arrive as <channel source="whatsapp" ' +
@@ -75,7 +97,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'reply',
-      description: 'Send a WhatsApp message back to the sender',
+      description: 'Send a WhatsApp message back to the owner',
       inputSchema: {
         type: 'object' as const,
         properties: {
@@ -85,7 +107,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           text: {
             type: 'string',
-            description: 'The message text to send back to the owner',
+            description: 'The message text to send',
           },
         },
         required: ['instance', 'text'],
@@ -100,29 +122,20 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     throw new Error(`Unknown tool: ${req.params.name}`)
   }
 
-  const { instance, text } = req.params.arguments as {
-    instance: string
-    text: string
-  }
+  const { instance, text } = req.params.arguments as { instance: string; text: string }
 
-  // Validate arguments before use
-  if (!instance || typeof instance !== 'string' ||
-      !text || typeof text !== 'string') {
+  if (!instance || typeof instance !== 'string' || !text || typeof text !== 'string') {
     return {
       content: [{ type: 'text' as const, text: 'Invalid arguments: instance and text must be non-empty strings' }],
       isError: true,
     }
   }
 
-  // Always reply to the configured owner number
   const url = `${ENV.apiUrl}/message/sendText/${instance}`
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: {
-        apikey: ENV.apiKey,
-        'Content-Type': 'application/json',
-      },
+      headers: { apikey: ENV.apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ number: ENV.allowedNumber, text }),
     })
 
@@ -136,86 +149,58 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    console.error(`[whatsapp] Network error sending reply: ${msg}`)
+    console.error(`[whatsapp] Network error: ${msg}`)
     return {
       content: [{ type: 'text' as const, text: `Network error: ${msg}` }],
       isError: true,
     }
   }
 
-  console.error(`[whatsapp] Replied to ${ENV.allowedNumber} on ${instance}`)
   return { content: [{ type: 'text' as const, text: 'sent' }] }
 })
 
 // --- Connect to Claude Code ---
 await mcp.connect(new StdioServerTransport())
-console.error('[whatsapp] MCP server connected.')
+console.error('[whatsapp] MCP connected.')
 
 // --- Webhook HTTP listener ---
 Bun.serve({
   port: ENV.webhookPort,
   hostname: '127.0.0.1',
   async fetch(req) {
-    // Only handle POST /webhook
     const url = new URL(req.url)
     if (req.method !== 'POST' || url.pathname !== '/webhook') {
       return new Response('not found', { status: 404 })
     }
 
-    // 1. Parse payload
-    // Note: no secret check needed — listener is bound to 127.0.0.1 (localhost only)
-    const rawBody = await req.text()
-    // Write every raw request to a log file for debugging
-    const logLine = `\n--- ${new Date().toISOString()} ---\n${rawBody}\n`
-    await Bun.write('/tmp/whatsapp-webhook.log', Bun.file('/tmp/whatsapp-webhook.log').exists().then(
-      e => e ? Bun.file('/tmp/whatsapp-webhook.log').text().then(t => t + logLine) : logLine
-    ).catch(() => logLine))
-
     let payload: any
     try {
-      payload = JSON.parse(rawBody)
+      payload = JSON.parse(await req.text())
     } catch {
-      console.error('[whatsapp] Failed to parse webhook payload as JSON:', rawBody.slice(0, 200))
       return new Response('ok')
     }
 
-    // DEBUG: log every incoming webhook so we can see what Evolution API sends
-    console.error('[whatsapp] DEBUG webhook payload:', JSON.stringify(payload, null, 2).slice(0, 500))
-
-    // 2. Only handle MESSAGES_UPSERT events
-    // Evolution API v1 sends "messages.upsert", v2 sends "MESSAGES_UPSERT"
+    // Handle both "MESSAGES_UPSERT" (v2) and "messages.upsert" (v1)
     const eventName = (payload.event ?? '').toLowerCase().replace(/_/g, '.')
-    if (eventName !== 'messages.upsert') {
-      console.error(`[whatsapp] Ignoring event type: "${payload.event}"`)
-      return new Response('ok')
-    }
+    if (eventName !== 'messages.upsert') return new Response('ok')
 
     const data = payload.data
-    if (!data?.key) {
-      console.error('[whatsapp] Missing data.key in payload')
-      return new Response('ok')
-    }
+    if (!data?.key) return new Response('ok')
+    if (data.key.fromMe === true) return new Response('ok')
 
-    // 3. Skip outbound echoes
-    if (data.key.fromMe === true) {
-      console.error('[whatsapp] Skipping outbound echo')
-      return new Response('ok')
-    }
-
-    // 4. Extract and normalise sender
-    // remoteJid can be "918128755144@s.whatsapp.net" or "76875653206151@lid"
+    // Normalise JID: strips @s.whatsapp.net or @lid suffix
     const remoteJid: string = data.key.remoteJid ?? ''
-    const senderId = remoteJid.split('@')[0]  // strips any @suffix
+    const senderId = remoteJid.split('@')[0]
 
-    // 5. Allowlist check — accept phone number OR @lid identifier
-    const isAllowed = senderId === ENV.allowedNumber ||
-                      (ENV.allowedJid !== '' && senderId === ENV.allowedJid)
+    // Allowlist: accept phone number OR @lid identifier
+    const isAllowed =
+      senderId === ENV.allowedNumber ||
+      (ENV.allowedJid !== '' && senderId === ENV.allowedJid)
     if (!isAllowed) {
-      console.error(`[whatsapp] Dropping message from non-allowlisted sender: ${remoteJid}`)
+      console.error(`[whatsapp] Dropping message from: ${remoteJid}`)
       return new Response('ok')
     }
 
-    // 6. Extract message text
     const messageText: string =
       data.message?.conversation ??
       data.message?.extendedTextMessage?.text ??
@@ -224,35 +209,20 @@ Bun.serve({
     const messageId: string = data.key.id ?? 'unknown'
     const instanceName: string = payload.instance ?? ENV.instance
 
-    // 7. Warn on instance mismatch
-    if (instanceName !== ENV.instance) {
-      console.error(
-        `[whatsapp] Warning: webhook instance "${instanceName}" doesn't match EVOLUTION_INSTANCE "${ENV.instance}"`,
-      )
-    }
-
-    // 8. Emit channel notification
-    console.error(`[whatsapp] Message from ${remoteJid}: ${messageText.slice(0, 60)}`)
     try {
       await mcp.notification({
         method: 'notifications/claude/channel',
         params: {
           content: xmlEscape(messageText),
-          meta: {
-            // pass full JID so reply tool can route back correctly
-            jid: remoteJid,
-            instance: instanceName,
-            message_id: messageId,
-          },
+          meta: { instance: instanceName, message_id: messageId },
         },
       })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      console.error(`[whatsapp] Failed to emit notification: ${msg}`)
+      console.error(`[whatsapp] Failed to emit notification: ${err}`)
     }
 
     return new Response('ok')
   },
 })
 
-console.error(`[whatsapp] Webhook listener on http://127.0.0.1:${ENV.webhookPort}/webhook`)
+console.error(`[whatsapp] Webhook listening on http://127.0.0.1:${ENV.webhookPort}/webhook`)
