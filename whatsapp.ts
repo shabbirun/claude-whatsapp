@@ -43,6 +43,16 @@ const ENV = {
 
 console.error('[whatsapp] Env validated. Starting...')
 
+// --- XML escape utility (prompt injection prevention) ---
+function xmlEscape(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
 // --- MCP server ---
 const mcp = new Server(
   { name: 'whatsapp', version: '1.0.0' },
