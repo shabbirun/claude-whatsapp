@@ -1,5 +1,12 @@
 #!/usr/bin/env bun
 
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import {
+  ListToolsRequestSchema,
+  CallToolRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js'
+
 // --- Env validation (must run before anything else) ---
 const REQUIRED = [
   'EVOLUTION_API_URL',
@@ -35,3 +42,24 @@ const ENV = {
 } as const
 
 console.error('[whatsapp] Env validated. Starting...')
+
+// --- MCP server ---
+const mcp = new Server(
+  { name: 'whatsapp', version: '1.0.0' },
+  {
+    capabilities: {
+      experimental: { 'claude/channel': {} },  // Claude Code channel extension
+      tools: {},                                 // enables tool discovery
+    },
+    instructions:
+      'You are a WhatsApp assistant. Messages arrive as <channel source="whatsapp" ' +
+      'phone="..." instance="..." message_id="...">. When you receive a message, read it ' +
+      'and respond helpfully. Use the reply tool to send your response back, passing the ' +
+      'phone and instance from the tag. Be concise — this is a chat interface. Only one ' +
+      'source is allowlisted; all messages are from the owner.',
+  },
+)
+
+// --- Connect to Claude Code ---
+await mcp.connect(new StdioServerTransport())
+console.error('[whatsapp] MCP server connected.')
