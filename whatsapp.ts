@@ -44,7 +44,8 @@ const ENV = {
 console.error('[whatsapp] Env validated. Starting...')
 
 // --- XML escape utility (prompt injection prevention) ---
-function xmlEscape(str: string): string {
+function xmlEscape(str: string | null | undefined): string {
+  if (!str) return ''
   return str
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
