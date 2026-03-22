@@ -111,6 +111,16 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     text: string
   }
 
+  // Validate arguments before use
+  if (!phone || typeof phone !== 'string' ||
+      !instance || typeof instance !== 'string' ||
+      !text || typeof text !== 'string') {
+    return {
+      content: [{ type: 'text' as const, text: 'Invalid arguments: phone, instance, and text must be non-empty strings' }],
+      isError: true,
+    }
+  }
+
   // Warn if instance doesn't match env (not an error — still send)
   if (instance !== ENV.instance) {
     console.error(
@@ -119,20 +129,29 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   const url = `${ENV.apiUrl}/message/sendText/${instance}`
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      apikey: ENV.apiKey,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ number: phone, text }),
-  })
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        apikey: ENV.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ number: phone, text }),
+    })
 
-  if (!res.ok) {
-    const body = await res.text()
-    console.error(`[whatsapp] Reply failed: ${res.status} ${body}`)
+    if (!res.ok) {
+      const body = (await res.text()).slice(0, 300)
+      console.error(`[whatsapp] Reply failed: ${res.status} ${body}`)
+      return {
+        content: [{ type: 'text' as const, text: `Failed to send: ${res.status} ${body}` }],
+        isError: true,
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[whatsapp] Network error sending reply: ${msg}`)
     return {
-      content: [{ type: 'text' as const, text: `Failed to send: ${res.status} ${body}` }],
+      content: [{ type: 'text' as const, text: `Network error: ${msg}` }],
       isError: true,
     }
   }
