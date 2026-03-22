@@ -71,6 +71,76 @@ const mcp = new Server(
   },
 )
 
+// --- Tool: list ---
+mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: 'reply',
+      description: 'Send a WhatsApp message back to the sender',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          phone: {
+            type: 'string',
+            description: 'Sender phone number from the <channel> tag (digits only, no +)',
+          },
+          instance: {
+            type: 'string',
+            description: 'Evolution API instance name from the <channel> tag',
+          },
+          text: {
+            type: 'string',
+            description: 'The message text to send',
+          },
+        },
+        required: ['phone', 'instance', 'text'],
+      },
+    },
+  ],
+}))
+
+// --- Tool: call ---
+mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  if (req.params.name !== 'reply') {
+    throw new Error(`Unknown tool: ${req.params.name}`)
+  }
+
+  const { phone, instance, text } = req.params.arguments as {
+    phone: string
+    instance: string
+    text: string
+  }
+
+  // Warn if instance doesn't match env (not an error — still send)
+  if (instance !== ENV.instance) {
+    console.error(
+      `[whatsapp] Warning: reply instance "${instance}" doesn't match EVOLUTION_INSTANCE "${ENV.instance}"`,
+    )
+  }
+
+  const url = `${ENV.apiUrl}/message/sendText/${instance}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      apikey: ENV.apiKey,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ number: phone, text }),
+  })
+
+  if (!res.ok) {
+    const body = await res.text()
+    console.error(`[whatsapp] Reply failed: ${res.status} ${body}`)
+    return {
+      content: [{ type: 'text' as const, text: `Failed to send: ${res.status} ${body}` }],
+      isError: true,
+    }
+  }
+
+  console.error(`[whatsapp] Replied to ${phone} on ${instance}`)
+  return { content: [{ type: 'text' as const, text: 'sent' }] }
+})
+
 // --- Connect to Claude Code ---
 await mcp.connect(new StdioServerTransport())
 console.error('[whatsapp] MCP server connected.')
