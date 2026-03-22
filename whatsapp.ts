@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { timingSafeEqual } from 'node:crypto'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -175,9 +176,11 @@ Bun.serve({
       return new Response('not found', { status: 404 })
     }
 
-    // 1. Verify webhook secret
-    const incomingSecret = req.headers.get('apikey')
-    if (incomingSecret !== ENV.webhookSecret) {
+    // 1. Verify webhook secret (timing-safe comparison)
+    const incomingSecret = req.headers.get('apikey') ?? ''
+    const secretsMatch = incomingSecret.length === ENV.webhookSecret.length &&
+      timingSafeEqual(Buffer.from(incomingSecret), Buffer.from(ENV.webhookSecret))
+    if (!secretsMatch) {
       console.error('[whatsapp] Webhook secret mismatch — dropping request')
       return new Response('ok')  // 200 to prevent retries
     }
@@ -203,6 +206,7 @@ Bun.serve({
 
     // 4. Skip outbound echoes
     if (data.key.fromMe === true) {
+      console.error('[whatsapp] Skipping outbound echo')
       return new Response('ok')
     }
 
@@ -234,17 +238,22 @@ Bun.serve({
 
     // 9. Emit channel notification
     console.error(`[whatsapp] Message from ${senderPhone}: ${messageText.slice(0, 60)}`)
-    await mcp.notification({
-      method: 'notifications/claude/channel',
-      params: {
-        content: xmlEscape(messageText),
-        meta: {
-          phone: senderPhone,
-          instance: instanceName,
-          message_id: messageId,
+    try {
+      await mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content: xmlEscape(messageText),
+          meta: {
+            phone: senderPhone,
+            instance: instanceName,
+            message_id: messageId,
+          },
         },
-      },
-    })
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.error(`[whatsapp] Failed to emit notification: ${msg}`)
+    }
 
     return new Response('ok')
   },
