@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "whatsapp": {
+      "command": "bun",
+      "args": ["./whatsapp.ts"],
+      "env": {}
+    }
+  }
+}
