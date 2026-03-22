@@ -1,4 +1,4 @@
 .env
 node_modules/
-bun.lockb
+# bun.lockb is the old binary lockfile format (Bun <1.2), kept for safety
 .DS_Store

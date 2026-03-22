@@ -122,6 +122,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     }
   }
 
+  if (!/^\d+$/.test(phone)) {
+    return {
+      content: [{ type: 'text' as const, text: `Invalid phone: must be digits only (no +), got: ${phone}` }],
+      isError: true,
+    }
+  }
+
   // Warn if instance doesn't match env (not an error — still send)
   if (instance !== ENV.instance) {
     console.error(
