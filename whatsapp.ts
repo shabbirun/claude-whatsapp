@@ -10,7 +10,7 @@ const REQUIRED = [
 ] as const
 
 for (const key of REQUIRED) {
-  if (!process.env[key]) {
+  if (!process.env[key]?.trim()) {
     console.error(`[whatsapp] Missing required env var: ${key}`)
     process.exit(1)
   }
@@ -27,7 +27,11 @@ const ENV = {
   instance:       process.env.EVOLUTION_INSTANCE!,
   allowedNumber:  process.env.ALLOWED_NUMBER!,
   webhookSecret:  process.env.EVOLUTION_WEBHOOK_SECRET!,
-  webhookPort:    parseInt(process.env.WEBHOOK_PORT ?? '3456', 10),
-}
+  webhookPort: (() => {
+    const p = parseInt(process.env.WEBHOOK_PORT ?? '3456', 10)
+    if (isNaN(p)) { console.error('[whatsapp] WEBHOOK_PORT must be a number'); process.exit(1) }
+    return p
+  })(),
+} as const
 
 console.error('[whatsapp] Env validated. Starting...')
