@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 
-import { timingSafeEqual } from 'node:crypto'
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
@@ -14,7 +13,6 @@ const REQUIRED = [
   'EVOLUTION_API_KEY',
   'EVOLUTION_INSTANCE',
   'ALLOWED_NUMBER',
-  'EVOLUTION_WEBHOOK_SECRET',
 ] as const
 
 for (const key of REQUIRED) {
@@ -34,7 +32,6 @@ const ENV = {
   apiKey:         process.env.EVOLUTION_API_KEY!,
   instance:       process.env.EVOLUTION_INSTANCE!,
   allowedNumber:  process.env.ALLOWED_NUMBER!,
-  webhookSecret:  process.env.EVOLUTION_WEBHOOK_SECRET!,
   webhookPort: (() => {
     const p = parseInt(process.env.WEBHOOK_PORT ?? '3456', 10)
     if (isNaN(p)) { console.error('[whatsapp] WEBHOOK_PORT must be a number'); process.exit(1) }
@@ -183,16 +180,8 @@ Bun.serve({
       return new Response('not found', { status: 404 })
     }
 
-    // 1. Verify webhook secret (timing-safe comparison)
-    const incomingSecret = req.headers.get('apikey') ?? ''
-    const secretsMatch = incomingSecret.length === ENV.webhookSecret.length &&
-      timingSafeEqual(Buffer.from(incomingSecret), Buffer.from(ENV.webhookSecret))
-    if (!secretsMatch) {
-      console.error('[whatsapp] Webhook secret mismatch — dropping request')
-      return new Response('ok')  // 200 to prevent retries
-    }
-
-    // 2. Parse payload
+    // 1. Parse payload
+    // Note: no secret check needed — listener is bound to 127.0.0.1 (localhost only)
     let payload: any
     try {
       payload = await req.json()
@@ -201,7 +190,7 @@ Bun.serve({
       return new Response('ok')
     }
 
-    // 3. Only handle MESSAGES_UPSERT events
+    // 2. Only handle MESSAGES_UPSERT events
     if (payload.event !== 'messages.upsert') {
       return new Response('ok')
     }
@@ -211,23 +200,23 @@ Bun.serve({
       return new Response('ok')
     }
 
-    // 4. Skip outbound echoes
+    // 3. Skip outbound echoes
     if (data.key.fromMe === true) {
       console.error('[whatsapp] Skipping outbound echo')
       return new Response('ok')
     }
 
-    // 5. Extract and normalise sender
+    // 4. Extract and normalise sender
     const remoteJid: string = data.key.remoteJid ?? ''
     const senderPhone = remoteJid.replace('@s.whatsapp.net', '')
 
-    // 6. Allowlist check
+    // 5. Allowlist check
     if (senderPhone !== ENV.allowedNumber) {
       console.error(`[whatsapp] Dropping message from non-allowlisted sender: ${senderPhone}`)
       return new Response('ok')
     }
 
-    // 7. Extract message text
+    // 6. Extract message text
     const messageText: string =
       data.message?.conversation ??
       data.message?.extendedTextMessage?.text ??
@@ -236,14 +225,14 @@ Bun.serve({
     const messageId: string = data.key.id ?? 'unknown'
     const instanceName: string = payload.instance ?? ENV.instance
 
-    // 8. Warn on instance mismatch
+    // 7. Warn on instance mismatch
     if (instanceName !== ENV.instance) {
       console.error(
         `[whatsapp] Warning: webhook instance "${instanceName}" doesn't match EVOLUTION_INSTANCE "${ENV.instance}"`,
       )
     }
 
-    // 9. Emit channel notification
+    // 8. Emit channel notification
     console.error(`[whatsapp] Message from ${senderPhone}: ${messageText.slice(0, 60)}`)
     try {
       await mcp.notification({
