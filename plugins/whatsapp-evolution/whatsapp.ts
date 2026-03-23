@@ -163,6 +163,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 await mcp.connect(new StdioServerTransport())
 console.error('[whatsapp] MCP connected.')
 
+// Exit when Claude Code closes the stdio pipe (prevents orphaned process holding port)
+process.stdin.on('close', () => process.exit(0))
+process.stdin.on('end', () => process.exit(0))
+
 // --- Webhook HTTP listener ---
 Bun.serve({
   reusePort: true,
