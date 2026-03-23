@@ -165,6 +165,7 @@ console.error('[whatsapp] MCP connected.')
 
 // --- Webhook HTTP listener ---
 Bun.serve({
+  reusePort: true,
   port: ENV.webhookPort,
   hostname: '127.0.0.1',
   async fetch(req) {
