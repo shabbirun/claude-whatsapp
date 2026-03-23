@@ -163,9 +163,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 await mcp.connect(new StdioServerTransport())
 console.error('[whatsapp] MCP connected.')
 
-// Exit when Claude Code closes the stdio pipe (prevents orphaned process holding port)
+// Exit when Claude Code closes the pipe — Bun-compatible parent-death detection
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE' || err.code === 'ERR_STREAM_DESTROYED') process.exit(0)
+})
 process.stdin.on('close', () => process.exit(0))
 process.stdin.on('end', () => process.exit(0))
+// Poll PPID: exit if parent process is gone (most reliable fallback in Bun)
+const _parentPid = process.ppid
+setInterval(() => {
+  try { process.kill(_parentPid, 0) } catch { process.exit(0) }
+}, 5000)
 
 // --- Webhook HTTP listener ---
 Bun.serve({
